@@ -215,17 +215,33 @@ def parse_json_output(text: str) -> dict:
     if not text:
         raise ValueError("Model returned empty response when JSON was expected.")
 
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    def _extract_json_candidate(raw: str) -> str:
+        fenced = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw, re.IGNORECASE)
+        if fenced:
+            return fenced.group(1).strip()
 
-    match = re.search(r"\{[\s\S]*\}", text)
-    if not match:
-        raise ValueError("Could not find JSON object in model output.")
+        match = re.search(r"\{[\s\S]*\}", raw)
+        if match:
+            return match.group(0).strip()
 
-    extracted = match.group(0)
-    return json.loads(extracted)
+        return raw.strip()
+
+    def _sanitize_json_candidate(raw: str) -> str:
+        # Escape invalid backslashes that often appear in LLM-generated JSON strings.
+        sanitized = re.sub(r'(?<!\\)\\(?!["\\/bfnrtu])', r'\\\\', raw)
+        # Remove trailing commas before closing braces/brackets.
+        sanitized = re.sub(r",\s*([}\]])", r"\1", sanitized)
+        return sanitized
+
+    candidate = _extract_json_candidate(text)
+
+    for attempt in (candidate, _sanitize_json_candidate(candidate)):
+        try:
+            return json.loads(attempt)
+        except json.JSONDecodeError:
+            continue
+
+    raise ValueError("Could not parse valid JSON from model output.")
 
 
 def normalize_features(raw_features):
