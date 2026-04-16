@@ -38,16 +38,15 @@ pip install -r requirements.txt
 3. Configure environment:
 
 - Copy `.env.example` to `.env`
-- Set your API key in `LLM_API_KEY`
-- Optionally adjust `LLM_BASE_URL`, `MARKET_MODEL`, `SRS_MODEL`
+- Set your API key in `GROQ_API_KEY`
+- Optionally adjust `GROQ_BASE_URL` and `MODEL`
 
 Example `.env`:
 
 ```env
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=https://openrouter.ai/api/v1
-MARKET_MODEL=groq/compound
-SRS_MODEL=openai/gpt-oss-120b
+GROQ_BASE_URL=https://api.groq.com/openai/v1
+GROQ_API_KEY=your_gsk_key_here
+MODEL=groq/compound
 ```
 
 4. Run app:

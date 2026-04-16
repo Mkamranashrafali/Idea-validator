@@ -30,6 +30,8 @@ const differentiationEl = document.getElementById("differentiation");
 const suggestionsListEl = document.getElementById("suggestionsList");
 const srsPreviewEl = document.getElementById("srsPreview");
 
+const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:5000" : "";
+
 
 function showAlert(message, type = "error") {
   const div = document.createElement("div");
@@ -124,11 +126,16 @@ function renderSuggestions(suggestions = []) {
 }
 
 async function postJson(url, body) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${url}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (_) {
+    throw new Error("Could not reach backend API. Start Flask server with 'python app.py' and open http://127.0.0.1:5000.");
+  }
 
   if (!res.ok) {
     let error = "Unknown error";
@@ -267,14 +274,19 @@ downloadBtn.addEventListener("click", async () => {
       throw new Error("No SRS available. Generate Stage 3 first.");
     }
 
-    const res = await fetch("/api/download", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: appState.stage1?.title || "software_requirements_specification",
-        srsMarkdown: appState.srsMarkdown,
-      }),
-    });
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/api/download`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: appState.stage1?.title || "software_requirements_specification",
+          srsMarkdown: appState.srsMarkdown,
+        }),
+      });
+    } catch (_) {
+      throw new Error("Could not reach backend API. Start Flask server with 'python app.py' and open http://127.0.0.1:5000.");
+    }
 
     if (!res.ok) {
       throw new Error("Download failed.");
@@ -300,3 +312,14 @@ downloadBtn.addEventListener("click", async () => {
     downloadBtn.textContent = "Download";
   }
 });
+
+(async function checkBackendHealth() {
+  try {
+    const response = await fetch(`${API_BASE}/api/health`);
+    if (!response.ok) {
+      throw new Error("Health check failed");
+    }
+  } catch (_) {
+    showAlert("Backend is not reachable. Run 'python app.py' and open http://127.0.0.1:5000.");
+  }
+})();

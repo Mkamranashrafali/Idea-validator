@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request, send_file
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
+load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
 
 app = Flask(__name__)
 
@@ -71,35 +71,55 @@ def get_env(name: str, default: str = "") -> str:
     return value.strip() if value else ""
 
 
-def get_client_config() -> dict:
-    base_url = get_env("LLM_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
-    llm_api_key = get_env("LLM_API_KEY")
-    openrouter_api_key = get_env("OPENROUTER_API_KEY")
-    groq_api_key = get_env("GROQ_API_KEY")
-    grok_api_key = get_env("GROK_API_KEY")
+def clamp_text(text: str, max_chars: int) -> str:
+    text = (text or "").strip()
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars]}\n\n[Truncated to fit request size limits.]"
 
-    # Choose a provider-specific key first to avoid mixing credentials
-    # (for example, gsk_* key with OpenRouter base URL).
-    if "openrouter" in base_url:
-        api_key = openrouter_api_key or llm_api_key
-    elif "groq" in base_url:
-        api_key = groq_api_key or llm_api_key
-    elif "x.ai" in base_url:
-        api_key = grok_api_key or llm_api_key
-    else:
-        api_key = llm_api_key or openrouter_api_key or groq_api_key or grok_api_key
+
+def compact_features(features: list[str], max_items: int = 20, max_chars_per_item: int = 220) -> list[str]:
+    compacted = []
+    for item in features[:max_items]:
+        compacted.append(clamp_text(str(item), max_chars_per_item))
+    return [item for item in compacted if item]
+
+
+def compact_competitors(competitors: list[dict], max_items: int = 8, max_chars_per_field: int = 420) -> list[dict]:
+    compacted = []
+    for comp in competitors[:max_items]:
+        if not isinstance(comp, dict):
+            continue
+
+        compacted.append(
+            {
+                "name": clamp_text(str(comp.get("name", "")), max_chars_per_field),
+                "url": clamp_text(str(comp.get("url", "")), max_chars_per_field),
+                "similarityScore": comp.get("similarityScore", 0),
+                "problem": clamp_text(str(comp.get("problem", "")), max_chars_per_field),
+                "solution": clamp_text(str(comp.get("solution", "")), max_chars_per_field),
+                "mainFeatures": compact_features(comp.get("mainFeatures", []), max_items=8, max_chars_per_item=140),
+                "relationToIdea": clamp_text(str(comp.get("relationToIdea", "")), max_chars_per_field),
+            }
+        )
+    return compacted
+
+
+def get_client_config() -> dict:
+    base_url = get_env("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+    api_key = get_env("GROQ_API_KEY")
+    model = get_env("MODEL", "groq/compound")
 
     if not api_key:
-        raise ValueError(
-            "Missing API key. Set LLM_API_KEY or provider-specific key in .env "
-            "(OPENROUTER_API_KEY / GROQ_API_KEY / GROK_API_KEY)."
-        )
+        raise ValueError("Missing API key. Set GROQ_API_KEY in .env")
+
+    if not model:
+        raise ValueError("Missing model. Set MODEL in .env (example: openai/gpt-oss-120b).")
 
     return {
         "api_key": api_key,
         "base_url": base_url,
-        "market_model": get_env("MARKET_MODEL", "groq/compound"),
-        "srs_model": get_env("SRS_MODEL", "openai/gpt-oss-120b"),
+        "model": model,
     }
 
 
@@ -107,19 +127,28 @@ def call_chat_model(model: str, system_prompt: str, user_prompt: str, temperatur
     config = get_client_config()
     base_url = config["base_url"]
     api_key = config["api_key"]
-    model_candidates = [model]
 
-    # Route groq/* model IDs directly to Groq's OpenAI-compatible endpoint.
-    if model.startswith("groq/"):
-        groq_model = model.split("/", 1)[1].strip()
-        base_url = get_env("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
-        api_key = get_env("GROQ_API_KEY") or get_env("LLM_API_KEY")
-        if not api_key:
-            raise ValueError("Missing Groq key. Set GROQ_API_KEY (or LLM_API_KEY with gsk_* key) in .env")
+    requested_model = model.strip()
+    model_candidates = [requested_model]
 
-        model_candidates = [groq_model]
-        if groq_model == "compound":
-            model_candidates.append("compound-beta")
+    # Groq accepts fully-qualified IDs like "groq/compound".
+    # Keep the requested model first, then try practical fallbacks.
+    if requested_model == "groq/compound":
+        model_candidates.extend([
+            "groq/compound-mini",
+            "llama-3.3-70b-versatile",
+        ])
+
+    # De-duplicate while preserving order.
+    model_candidates = list(dict.fromkeys(model_candidates))
+
+    # Prepare progressively smaller prompt variants to recover from
+    # provider-side request size limits.
+    prompt_variants = [user_prompt]
+    for max_chars in (12000, 8000, 5000, 3000):
+        if len(user_prompt) > max_chars:
+            prompt_variants.append(clamp_text(user_prompt, max_chars))
+    prompt_variants = list(dict.fromkeys(prompt_variants))
 
     url = f"{base_url}/chat/completions"
 
@@ -128,34 +157,52 @@ def call_chat_model(model: str, system_prompt: str, user_prompt: str, temperatur
         "Content-Type": "application/json",
     }
 
-    if "openrouter" in base_url:
-        headers["HTTP-Referer"] = "http://localhost:5000"
-        headers["X-Title"] = "Idea Validator"
-
     last_error = None
-    for candidate_model in model_candidates:
-        payload = {
-            "model": candidate_model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": temperature,
-        }
+    for model_index, candidate_model in enumerate(model_candidates):
+        for prompt_index, candidate_prompt in enumerate(prompt_variants):
+            payload = {
+                "model": candidate_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": candidate_prompt},
+                ],
+                "temperature": temperature,
+            }
 
-        response = requests.post(url, headers=headers, json=payload, timeout=90)
-        if response.status_code >= 400:
-            last_error = response
-            # If one alias fails on 400, try next candidate.
-            if response.status_code == 400 and candidate_model != model_candidates[-1]:
-                continue
-            response.raise_for_status()
+            response = requests.post(url, headers=headers, json=payload, timeout=90)
+            if response.status_code >= 400:
+                last_error = response
 
-        data = response.json()
-        try:
-            return data["choices"][0]["message"]["content"].strip()
-        except (KeyError, IndexError, TypeError):
-            raise ValueError(f"Unexpected model response format: {json.dumps(data)[:500]}")
+                error_code = ""
+                error_message = ""
+                try:
+                    error_payload = response.json().get("error", {})
+                    error_code = str(error_payload.get("code", "")).strip().lower()
+                    error_message = str(error_payload.get("message", "")).strip().lower()
+                except Exception:
+                    pass
+
+                is_too_large = (
+                    response.status_code == 413
+                    or error_code == "request_too_large"
+                    or "request entity too large" in error_message
+                )
+
+                # Retry same model with a smaller prompt variant if available.
+                if is_too_large and prompt_index < len(prompt_variants) - 1:
+                    continue
+
+                # Try next fallback model on client-side 400 responses.
+                if response.status_code == 400 and model_index < len(model_candidates) - 1:
+                    break
+
+                response.raise_for_status()
+
+            data = response.json()
+            try:
+                return data["choices"][0]["message"]["content"].strip()
+            except (KeyError, IndexError, TypeError):
+                raise ValueError(f"Unexpected model response format: {json.dumps(data)[:500]}")
 
     if last_error is not None:
         last_error.raise_for_status()
@@ -193,6 +240,8 @@ def normalize_features(raw_features):
 
 
 def market_research_user_prompt(raw_idea: str, features: list[str]) -> str:
+    raw_idea = clamp_text(raw_idea, 4500)
+    features = compact_features(features, max_items=20, max_chars_per_item=180)
     feature_block = "\n".join([f"- {item}" for item in features]) if features else "- Not provided"
     return f"""INPUT:
 Product Idea:
@@ -220,6 +269,9 @@ Also include:
 
 
 def structure_analysis_user_prompt(raw_idea: str, features: list[str], research_text: str) -> str:
+    raw_idea = clamp_text(raw_idea, 4500)
+    features = compact_features(features, max_items=20, max_chars_per_item=180)
+    research_text = clamp_text(research_text, 16000)
     return f"""INPUT:
 Original Idea:
 \"\"\"
@@ -261,6 +313,11 @@ Return ONLY valid JSON:
 
 
 def suggestions_user_prompt(title: str, problem: str, solution: str, summary: str, competitors: list[dict]) -> str:
+    title = clamp_text(title, 300)
+    problem = clamp_text(problem, 1800)
+    solution = clamp_text(solution, 1800)
+    summary = clamp_text(summary, 2400)
+    competitors = compact_competitors(competitors, max_items=8, max_chars_per_field=420)
     return f"""INPUT:
 Title: {title}
 Problem: {problem}
@@ -287,6 +344,10 @@ Return ONLY valid JSON:
 
 
 def srs_user_prompt(title: str, problem: str, solution: str, final_features: list[str]) -> str:
+    title = clamp_text(title, 300)
+    problem = clamp_text(problem, 2000)
+    solution = clamp_text(solution, 2000)
+    final_features = compact_features(final_features, max_items=30, max_chars_per_item=220)
     return f"""INPUT:
 Title: {title}
 Problem: {problem}
@@ -359,6 +420,11 @@ def index():
     return render_template("index.html")
 
 
+@app.get("/api/health")
+def health_check():
+    return jsonify({"status": "ok"})
+
+
 @app.post("/api/stage1")
 def stage1_market_analysis():
     try:
@@ -372,14 +438,14 @@ def stage1_market_analysis():
         config = get_client_config()
 
         research_text = call_chat_model(
-            model=config["market_model"],
+            model=config["model"],
             system_prompt=MARKET_RESEARCH_SYSTEM_PROMPT,
             user_prompt=market_research_user_prompt(raw_idea, features),
             temperature=0.2,
         )
 
         structured_raw = call_chat_model(
-            model=config["market_model"],
+            model=config["model"],
             system_prompt=STRUCTURE_ANALYSIS_SYSTEM_PROMPT,
             user_prompt=structure_analysis_user_prompt(raw_idea, features, research_text),
             temperature=0.1,
@@ -422,7 +488,7 @@ def stage2_improvements():
         config = get_client_config()
 
         suggestions_raw = call_chat_model(
-            model=config["srs_model"],
+            model=config["model"],
             system_prompt=SUGGESTIONS_SYSTEM_PROMPT,
             user_prompt=suggestions_user_prompt(title, problem, solution, summary, competitors),
             temperature=0.4,
@@ -458,7 +524,7 @@ def stage3_generate_srs():
         config = get_client_config()
 
         srs_markdown = call_chat_model(
-            model=config["srs_model"],
+            model=config["model"],
             system_prompt=SRS_SYSTEM_PROMPT,
             user_prompt=srs_user_prompt(title, problem, solution, final_features),
             temperature=0.2,
