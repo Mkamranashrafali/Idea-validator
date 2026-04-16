@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Idea Validator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <div class="bg-orb orb-a"></div>
+  <div class="bg-orb orb-b"></div>
+
+  <main class="container">
+    <header class="hero">
+      <p class="eyebrow">Startup Blueprint Generator</p>
+      <h1>From Raw Idea to Downloadable SRS</h1>
+      <p class="subtitle">Analyze market reality, sharpen your product angle, and generate a startup-grade software blueprint.</p>
+    </header>
+
+    <section id="alerts" class="alerts" aria-live="polite"></section>
+
+    <section class="card stage-card active" id="stage-0">
+      <div class="stage-head">
+        <span class="stage-badge">1</span>
+        <h2>Idea Input</h2>
+      </div>
+      <label for="rawIdea">Raw Idea</label>
+      <textarea id="rawIdea" placeholder="Example: AI tool that validates startup ideas by analyzing competitors and generating technical blueprints."></textarea>
+
+      <label for="features">Current Features (optional, one per line or comma-separated)</label>
+      <textarea id="features" placeholder="Example:\nMarket scan\nGap detection\nSRS export"></textarea>
+
+      <button id="startAnalysisBtn" class="btn-primary">Start Analysis</button>
+    </section>
+
+    <section class="card stage-card" id="stage-1">
+      <div class="stage-head">
+        <span class="stage-badge">2</span>
+        <h2>Stage 1: Market Analysis</h2>
+      </div>
+
+      <h3>Competitors</h3>
+      <div id="competitors" class="competitor-grid"></div>
+
+      <h3>Market Summary</h3>
+      <p id="marketSummary" class="summary"></p>
+
+      <h3>Differentiation Insight</h3>
+      <p id="differentiation" class="summary"></p>
+
+      <button id="toStage2Btn" class="btn-primary">Next</button>
+    </section>
+
+    <section class="card stage-card" id="stage-2">
+      <div class="stage-head">
+        <span class="stage-badge">3</span>
+        <h2>Stage 2: Improvements</h2>
+      </div>
+
+      <p class="hint">Select the suggestions you want to include in the final blueprint.</p>
+      <div id="suggestionsList" class="suggestions-list"></div>
+
+      <button id="toStage3Btn" class="btn-primary">Next</button>
+    </section>
+
+    <section class="card stage-card" id="stage-3">
+      <div class="stage-head">
+        <span class="stage-badge">4</span>
+        <h2>Stage 3: SRS Generate</h2>
+      </div>
+
+      <article id="srsPreview" class="srs-preview"></article>
+      <button id="downloadBtn" class="btn-primary">Download</button>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
