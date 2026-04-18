@@ -15,54 +15,187 @@ load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
 app = Flask(__name__)
 
 
-MARKET_RESEARCH_SYSTEM_PROMPT = """You are a senior market research analyst.
+MARKET_RESEARCH_SYSTEM_PROMPT = """You are a senior product-focused market research analyst specializing in SaaS and tech ecosystems.
+
+Your goal is NOT just to list competitors, but to deeply analyze the market landscape of the given product idea.
 
 Task:
-Analyze the given product idea and find real-world competitors, SaaS products, or GitHub repositories.
+Analyze the product idea and identify highly relevant, real-world competitors including SaaS products, startups, and open-source GitHub projects.
 
-RULES:
-- Only include real and verifiable products
-- Do NOT hallucinate or create fake companies
-- If unsure, do NOT include the entry
-- Prefer well-known or easily verifiable tools
-- Focus on real-world implementations
+STRICT RULES:
+- Only include REAL, verifiable, and existing products
+- Do NOT hallucinate or invent names, links, or companies
+- If you are not confident about a product, SKIP it
+- Prioritize products that are functionally similar (not just loosely related)
+- Focus on products solving the SAME or CLOSELY RELATED problem
+- Prefer well-known tools, funded startups, or active GitHub projects
+- Avoid outdated or dead products unless highly relevant
+
+ANALYSIS DEPTH:
+For each competitor:
+- Understand their CORE purpose (not surface-level)
+- Focus on their MAIN value proposition
+- Identify their key features (not generic ones)
+- Clearly explain how they overlap with the user's idea
+- Be precise in similarity scoring (0 = unrelated, 10 = nearly identical)
+
+INPUT:
+Product Idea:
+
+
+Current Features:
+{features}
+
+OUTPUT REQUIREMENTS:
+- Find 3–5 HIGHLY RELEVANT competitors (quality > quantity)
+- Provide:
+  - Product name
+  - Working URL (accurate)
+  - Problem they solve
+  - Solution approach
+  - Main features (concise and meaningful)
+  - Relation to this idea (clear comparison)
+  - Similarity score (0–10)
+
+Additionally:
+- Provide a concise MARKET SUMMARY explaining the current landscape
+- Clearly explain the DIFFERENTIATION FACTOR (what makes this idea unique or competitive)
+
+IMPORTANT:
+Focus on DEPTH, ACCURACY, and RELEVANCE over quantity.
 """
 
-STRUCTURE_ANALYSIS_SYSTEM_PROMPT = """You are a professional product analyst.
+STRUCTURE_ANALYSIS_SYSTEM_PROMPT = """You are a senior product analyst and data structuring expert.
+
+Your goal is to convert unstructured market research into clean, accurate, and structured product intelligence.
 
 Task:
-Convert the provided market research into structured product intelligence.
+Extract and transform the provided market research into a well-defined JSON structure.
 
-RULES:
-- Do NOT invent any data
-- Only use information present in the research
-- If data is missing, infer carefully or leave minimal
-- Ensure all URLs are from the research
+STRICT RULES:
+- Do NOT hallucinate or invent any data
+- ONLY use information explicitly present in the research
+- If a field is missing, infer carefully OR keep it minimal (do not fabricate)
+- Ensure all URLs are EXACTLY as given in the research (no modification)
+- Maintain consistency across all competitor entries
+- Similarity scores must remain unchanged (do not alter values)
+
+DATA QUALITY RULES:
+- Keep text concise, clear, and professional
+- Avoid vague or generic descriptions
+- Normalize competitor data (same structure for all)
+- Extract meaningful feature lists (avoid filler points)
+
+INPUT:
+Original Idea:
+
+
+Features:
+{features}
+
+Market Research:
+
+
+OUTPUT REQUIREMENTS:
+- Generate a clean and professional project TITLE
+- Extract a clear and focused PROBLEM statement
+- Extract a strong and practical SOLUTION
+- Structure all competitors into consistent format
+- Provide a meaningful MARKET SUMMARY
+- Provide a clear DIFFERENTIATION FACTOR
+
+OUTPUT FORMAT:
+Return ONLY valid JSON (no markdown, no explanation, no extra text)
 """
 
-SUGGESTIONS_SYSTEM_PROMPT = """You are a startup innovation strategist.
+SUGGESTIONS_SYSTEM_PROMPT = """You are a senior startup innovation strategist and product thinker.
+
+Your goal is to generate HIGH-IMPACT, NON-OBVIOUS improvements that can make a product stand out in a competitive market.
 
 Task:
-Generate 5 high-impact improvements based on competitor gaps and market opportunities.
+Based on the provided product idea and its competitor analysis, generate 5 powerful improvements.
 
-RULES:
-- Do NOT give generic suggestions (e.g., \"improve UI\", \"add AI\")
-- Each suggestion must be specific, actionable, and realistic
-- Base suggestions on competitor weaknesses or missing features
-- Focus on differentiation and uniqueness
+STRICT RULES:
+- Do NOT give generic suggestions (e.g., "improve UI", "add AI", "make it faster")
+- Each suggestion must be SPECIFIC, ACTIONABLE, and PRACTICAL
+- Focus on real differentiation, not minor enhancements
+- Base ideas on competitor weaknesses, missing features, or unexplored opportunities
+- Avoid obvious or commonly used startup ideas
+- Think like a founder trying to WIN the market
+
+QUALITY REQUIREMENTS:
+- Each suggestion should feel like a strong product decision
+- Prefer ideas that combine multiple concepts (feature + strategy + tech)
+- Highlight opportunities competitors have missed
+- Suggestions should be implementable (not futuristic fantasy)
 """
 
-SRS_SYSTEM_PROMPT = """You are a senior software architect.
+SRS_SYSTEM_PROMPT = """You are a senior software architect with experience in designing production-grade systems.
+
+Your goal is to generate a COMPLETE, DETAILED, and IMPLEMENTATION-READY Software Requirements Specification (SRS).
 
 Task:
-Generate a complete Software Requirements Specification (SRS) document.
+Create a full SRS document based on the given product idea, refined problem, solution, and final features.
 
-RULES:
-- Must be detailed and professional
-- Must include technical depth
-- Must be in Markdown format
-- Avoid generic statements
-- Be specific to the product
+STRICT RULES:
+- The document MUST be detailed and professionally structured
+- Avoid generic or vague statements
+- Be highly specific to the product context
+- Include technical depth that developers can directly use
+- Do NOT write filler content
+- Do NOT repeat the same ideas in different wording
+
+QUALITY REQUIREMENTS:
+- Clearly define system behavior and features
+- Include real-world technical considerations (APIs, data flow, architecture hints)
+- Write in a way that a developer can start building from this document
+- Break down features into meaningful functional requirements
+- Mention constraints, assumptions, and dependencies where relevant
+
+OUTPUT FORMAT:
+
+# Software Requirements Specification
+
+## 1. Introduction
+- Purpose
+- Scope
+- Intended Audience
+
+## 2. Overall Description
+- Product Perspective
+- Core System Workflow
+- User Classes and Characteristics
+- Assumptions and Dependencies
+
+## 3. System Architecture Overview
+- High-level architecture (e.g., client-server, microservices)
+- Key components/modules
+- Data flow description
+
+## 4. External Interface Requirements
+- User Interfaces
+- Software Interfaces (APIs, third-party integrations)
+- Communication Interfaces
+
+## 5. System Features
+- Detailed feature breakdown
+- Functional requirements for each feature
+- Edge cases and expected behavior
+
+## 6. Non-Functional Requirements
+- Performance
+- Scalability
+- Security
+- Reliability
+- Maintainability
+
+## 7. Constraints
+- Technical constraints
+- Business constraints
+
+IMPORTANT:
+- The output must be clean Markdown
+- The document should be detailed enough for direct development use
 """
 
 
@@ -268,19 +401,19 @@ Product Idea:
 Current Features:
 {feature_block}
 
-OUTPUT:
-Provide structured information for at least 3-5 competitors including:
+OUTPUT REQUIREMENTS:
+Provide structured information for 3-5 highly relevant competitors including:
 - Product name
 - Working URL
 - Problem they solve
 - Solution approach
-- Main features
+- Main features (concise and meaningful)
 - Relation to this idea
 - Similarity score (0-10)
 
 Also include:
-- Market summary
-- Differentiation insight
+- Market summary (concise landscape view)
+- Differentiation factor (what makes this idea unique or competitive)
 """
 
 
@@ -302,8 +435,15 @@ Market Research:
 {research_text}
 \"\"\"
 
-OUTPUT:
-Return ONLY valid JSON:
+OUTPUT REQUIREMENTS:
+- Generate a clean and professional project title
+- Extract a clear problem statement
+- Extract a practical solution
+- Structure competitor data consistently
+- Include summary and differentiation factor
+
+OUTPUT FORMAT:
+Return ONLY valid JSON (no markdown, no explanation, no extra text):
 
 {{
   \"title\": \"\",
@@ -341,6 +481,9 @@ Solution: {solution}
 Market Summary: {summary}
 Competitors:
 {json.dumps(competitors, ensure_ascii=True, indent=2)}
+
+OUTPUT REQUIREMENTS:
+Generate exactly 5 suggestions.
 
 OUTPUT:
 Return ONLY valid JSON:
@@ -382,22 +525,35 @@ OUTPUT FORMAT:
 
 ## 2. Overall Description
 - Product Perspective
-- Product Functions
-- User Classes
+- Core System Workflow
+- User Classes and Characteristics
+- Assumptions and Dependencies
 
-## 3. External Interface Requirements
+## 3. System Architecture Overview
+- High-level architecture
+- Key components/modules
+- Data flow description
+
+## 4. External Interface Requirements
 - User Interfaces
-- Software Interfaces
+- Software Interfaces (APIs, third-party integrations)
 - Communication Interfaces
 
-## 4. System Features
-- Detailed feature descriptions
+## 5. System Features
+- Detailed feature breakdown
+- Functional requirements for each feature
+- Edge cases and expected behavior
 
-## 5. Non-Functional Requirements
+## 6. Non-Functional Requirements
 - Performance
-- Security
 - Scalability
+- Security
 - Reliability
+- Maintainability
+
+## 7. Constraints
+- Technical constraints
+- Business constraints
 
 Ensure the document is detailed enough for developers to start implementation.
 """
