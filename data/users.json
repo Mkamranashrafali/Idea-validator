@@ -1,0 +1,14 @@
+{
+  "users": [
+    {
+      "id": "dd8116d7-40c2-4362-bf11-6956d24763e4",
+      "email": "su92-bsdsm-f24-002@superior.edu.pk",
+      "username": "new",
+      "passwordHash": "b3282a2f2a28757b3a18ab833de16a9c54518c0b0cf493e3f0a7cf09386f326a",
+      "isPremium": false,
+      "planId": "free",
+      "ideaQuota": 1,
+      "createdAt": "2026-04-18T10:34:52.556113"
+    }
+  ]
+}

@@ -2,17 +2,98 @@ import io
 import json
 import os
 import re
+import hashlib
+import uuid
 from datetime import datetime
 
 import requests
 from docx import Document
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request, send_file
+from flask import Flask, jsonify, redirect, render_template, request, send_file, session, url_for
+from werkzeug.utils import secure_filename
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-me")
+
+DATA_DIR = os.path.join(BASE_DIR, "data")
+UPLOAD_DIR = os.path.join(BASE_DIR, "uploads", "payment_proofs")
+USERS_FILE = os.path.join(DATA_DIR, "users.json")
+PAYMENTS_FILE = os.path.join(DATA_DIR, "payments.json")
+
+os.makedirs(DATA_DIR, exist_ok=True)
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+def _ensure_json_file(path: str, default_obj):
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(default_obj, f, ensure_ascii=True, indent=2)
+
+
+_ensure_json_file(USERS_FILE, {"users": []})
+_ensure_json_file(PAYMENTS_FILE, {"payments": []})
+
+
+def _read_json(path: str, default_obj):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default_obj
+
+
+def _write_json(path: str, payload):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=True, indent=2)
+
+
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def _find_user_by_username(users: list[dict], username: str):
+    normalized = username.strip().lower()
+    for user in users:
+        if str(user.get("username", "")).strip().lower() == normalized:
+            return user
+    return None
+
+
+def _find_user_by_email(users: list[dict], email: str):
+    normalized = email.strip().lower()
+    for user in users:
+        if str(user.get("email", "")).strip().lower() == normalized:
+            return user
+    return None
+
+
+def _is_duplicate_password(users: list[dict], password_hash: str) -> bool:
+    for user in users:
+        if user.get("passwordHash") == password_hash:
+            return True
+    return False
+
+
+def _allowed_payment_file(filename: str) -> bool:
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return ext in {"png", "jpg", "jpeg", "webp", "pdf"}
+
+
+def _safe_next_path(value: str, default: str = "") -> str:
+    candidate = (value or "").strip()
+    if not candidate:
+        return default
+
+    # Allow only same-site relative paths.
+    if not candidate.startswith("/"):
+        return default
+    if candidate.startswith("//"):
+        return default
+
+    return candidate
 
 
 MARKET_RESEARCH_SYSTEM_PROMPT = """You are a senior product-focused market research analyst specializing in SaaS and tech ecosystems.
@@ -130,72 +211,55 @@ QUALITY REQUIREMENTS:
 - Suggestions should be implementable (not futuristic fantasy)
 """
 
-SRS_SYSTEM_PROMPT = """You are a senior software architect with experience in designing production-grade systems.
+SRS_SYSTEM_PROMPT = """You are a senior product requirements writer focused on MVP planning.
 
-Your goal is to generate a COMPLETE, DETAILED, and IMPLEMENTATION-READY Software Requirements Specification (SRS).
+Your goal is to generate a practical and build-ready MVP requirements document in plain text.
 
 Task:
-Create a full SRS document based on the given product idea, refined problem, solution, and final features.
+Create an MVP Requirements Document using the exact section structure provided below.
 
 STRICT RULES:
-- The document MUST be detailed and professionally structured
-- Avoid generic or vague statements
-- Be highly specific to the product context
-- Include technical depth that developers can directly use
-- Do NOT write filler content
-- Do NOT repeat the same ideas in different wording
+- Follow the exact section numbering and order
+- Keep the document specific to the provided product context
+- Avoid filler text, generic startup advice, and repeated points
+- Keep language clear, concise, and implementation-oriented
+- Include concrete details for flows, requirements, and architecture choices
 
-QUALITY REQUIREMENTS:
-- Clearly define system behavior and features
-- Include real-world technical considerations (APIs, data flow, architecture hints)
-- Write in a way that a developer can start building from this document
-- Break down features into meaningful functional requirements
-- Mention constraints, assumptions, and dependencies where relevant
+OUTPUT REQUIREMENTS:
+- Return ONLY plain text
+- Do NOT use Markdown syntax (#, ##, -, *, ```)
+- Do NOT wrap output in code fences
+- Use this exact template and fill each section with relevant details
 
-OUTPUT FORMAT:
+MVP Requirements Document
 
-# Software Requirements Specification
+1. Product Overview
+Problem:
+Solution:
+MVP Goal:
 
-## 1. Introduction
-- Purpose
-- Scope
-- Intended Audience
+2. Core Features
 
-## 2. Overall Description
-- Product Perspective
-- Core System Workflow
-- User Classes and Characteristics
-- Assumptions and Dependencies
+3. User Flow
+Step-by-step product flow:
 
-## 3. System Architecture Overview
-- High-level architecture (e.g., client-server, microservices)
-- Key components/modules
-- Data flow description
+4. Functional Requirements
+Inputs:
+System behavior:
+Outputs:
 
-## 4. External Interface Requirements
-- User Interfaces
-- Software Interfaces (APIs, third-party integrations)
-- Communication Interfaces
+5. Basic Technical Architecture
+Frontend:
+Backend:
+Database / APIs:
 
-## 5. System Features
-- Detailed feature breakdown
-- Functional requirements for each feature
-- Edge cases and expected behavior
+6. Non-Functional Requirements
+Performance:
+Security:
 
-## 6. Non-Functional Requirements
-- Performance
-- Scalability
-- Security
-- Reliability
-- Maintainability
-
-## 7. Constraints
-- Technical constraints
-- Business constraints
-
-IMPORTANT:
-- The output must be clean Markdown
-- The document should be detailed enough for direct development use
+7. Phase Plan
+Phase 1 (MVP):
+Phase 2 (Future):
 """
 
 
@@ -388,6 +452,61 @@ def normalize_features(raw_features):
     return []
 
 
+def normalize_competitor_references(raw_refs, max_items: int = 8) -> list[dict]:
+    if not isinstance(raw_refs, list):
+        return []
+
+    normalized = []
+    for item in raw_refs[:max_items]:
+        if not isinstance(item, dict):
+            continue
+
+        name = clamp_text(str(item.get("name", "")).strip(), 140)
+        url = clamp_text(str(item.get("url", "")).strip(), 320)
+        if not name or not url:
+            continue
+
+        line_one = clamp_text(
+            str(item.get("problem") or item.get("relationToIdea") or "Relevant competitor/product in this market.").strip(),
+            220,
+        )
+        line_two = clamp_text(
+            str(item.get("solution") or item.get("relationToIdea") or "Included as a reference for feature and positioning analysis.").strip(),
+            220,
+        )
+
+        normalized.append(
+            {
+                "name": name,
+                "url": url,
+                "lineOne": line_one,
+                "lineTwo": line_two,
+            }
+        )
+
+    return normalized
+
+
+def append_competitor_references_section(srs_text: str, references: list[dict]) -> str:
+    base = (srs_text or "").strip()
+    if not references:
+        return base
+
+    lines = ["", "8. Competitor/Product References"]
+    for idx, ref in enumerate(references, start=1):
+        lines.append("")
+        lines.append(f"{idx}. {ref.get('name', 'Unknown')}")
+        lines.append(f"Link: {ref.get('url', '')}")
+        lines.append(f"Summary: {ref.get('lineOne', '')}")
+        lines.append(f"Details: {ref.get('lineTwo', '')}")
+
+    appendix = "\n".join(lines).strip()
+    if not base:
+        return appendix
+
+    return f"{base}\n\n{appendix}".strip()
+
+
 def market_research_user_prompt(raw_idea: str, features: list[str]) -> str:
     raw_idea = clamp_text(raw_idea, 4500)
     features = compact_features(features, max_items=20, max_chars_per_item=180)
@@ -514,49 +633,69 @@ Solution: {solution}
 Final Features:
 {json.dumps(final_features, ensure_ascii=True, indent=2)}
 
-OUTPUT FORMAT:
+REQUIRED TEMPLATE (must follow exactly):
 
-# Software Requirements Specification
+MVP Requirements Document
 
-## 1. Introduction
-- Purpose
-- Scope
-- Intended Audience
+1. Product Overview
+Problem:
+Solution:
+MVP Goal:
 
-## 2. Overall Description
-- Product Perspective
-- Core System Workflow
-- User Classes and Characteristics
-- Assumptions and Dependencies
+2. Core Features
 
-## 3. System Architecture Overview
-- High-level architecture
-- Key components/modules
-- Data flow description
+3. User Flow
+Step-by-step product flow:
 
-## 4. External Interface Requirements
-- User Interfaces
-- Software Interfaces (APIs, third-party integrations)
-- Communication Interfaces
+4. Functional Requirements
+Inputs:
+System behavior:
+Outputs:
 
-## 5. System Features
-- Detailed feature breakdown
-- Functional requirements for each feature
-- Edge cases and expected behavior
+5. Basic Technical Architecture
+Frontend:
+Backend:
+Database / APIs:
 
-## 6. Non-Functional Requirements
-- Performance
-- Scalability
-- Security
-- Reliability
-- Maintainability
+6. Non-Functional Requirements
+Performance:
+Security:
 
-## 7. Constraints
-- Technical constraints
-- Business constraints
+7. Phase Plan
+Phase 1 (MVP):
+Phase 2 (Future):
 
-Ensure the document is detailed enough for developers to start implementation.
+IMPORTANT:
+- Output must be plain text only
+- Do not use markdown syntax (#, ##, -, *, ```)
+- Do not use code fences
+- Fill every section with product-specific details
 """
+
+
+def normalize_srs_output(text: str) -> str:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return cleaned
+
+    fenced = re.match(r"^```(?:markdown|md)?\s*([\s\S]*?)\s*```$", cleaned, re.IGNORECASE)
+    if fenced:
+        cleaned = fenced.group(1).strip()
+
+    lines = []
+    for line in cleaned.splitlines():
+        line = line.rstrip()
+        if not line:
+            lines.append("")
+            continue
+
+        # Remove markdown heading markers if the model returns them.
+        line = re.sub(r"^\s*#{1,6}\s*", "", line)
+        # Convert markdown bullets to plain text labels.
+        line = re.sub(r"^\s*[-*]\s+", "", line)
+        lines.append(line)
+
+    return "\n".join(lines).strip()
 
 
 def markdown_to_docx(markdown_text: str, title: str) -> io.BytesIO:
@@ -587,14 +726,311 @@ def markdown_to_docx(markdown_text: str, title: str) -> io.BytesIO:
     return buffer
 
 
+def _render_frontend(page_mode: str = "home", checkout_plan: str = "", next_path: str = ""):
+    return render_template("index.html", page_mode=page_mode, checkout_plan=checkout_plan, next_path=next_path)
+
+
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return _render_frontend(page_mode="home")
+
+
+@app.get("/auth")
+def auth_page():
+    next_path = _safe_next_path(request.args.get("next", ""), default="")
+    return _render_frontend(page_mode="auth", next_path=next_path)
+
+
+@app.get("/pricing")
+def pricing_page():
+    if not session.get("username"):
+        return redirect(url_for("auth_page", next=request.path))
+    return _render_frontend(page_mode="pricing")
+
+
+@app.get("/checkout/<plan_id>")
+def checkout_page(plan_id: str):
+    if not session.get("username"):
+        return redirect(url_for("auth_page", next=request.path))
+
+    valid_plans = {"starter", "growth", "scale"}
+    normalized = plan_id.strip().lower()
+    if normalized not in valid_plans:
+        normalized = "growth"
+    return _render_frontend(page_mode="checkout", checkout_plan=normalized)
+
+
+@app.get("/workspace")
+def workspace_page():
+    if not session.get("username"):
+        return redirect(url_for("auth_page", next=request.path))
+    return _render_frontend(page_mode="workspace")
 
 
 @app.get("/api/health")
 def health_check():
     return jsonify({"status": "ok"})
+
+
+@app.get("/api/auth/session")
+def auth_session():
+    username = session.get("username")
+    if not username:
+        return jsonify({"authenticated": False, "user": None})
+
+    users_data = _read_json(USERS_FILE, {"users": []})
+    users = users_data.get("users", [])
+    user = _find_user_by_username(users, username)
+    if not user:
+        session.clear()
+        return jsonify({"authenticated": False, "user": None})
+
+    return jsonify(
+        {
+            "authenticated": True,
+            "user": {
+                "username": user.get("username"),
+                "isPremium": bool(user.get("isPremium", False)),
+                "planId": user.get("planId", "free"),
+                "ideaQuota": int(user.get("ideaQuota", 1)),
+            },
+        }
+    )
+
+
+@app.post("/api/auth/signup")
+def auth_signup():
+    try:
+        payload = request.get_json(force=True)
+        email = str(payload.get("email", "")).strip()
+        username = str(payload.get("username", "")).strip()
+        password = str(payload.get("password", "")).strip()
+
+        if "@" not in email or len(email) < 5:
+            return jsonify({"error": "A valid email is required."}), 400
+        if len(username) < 3:
+            return jsonify({"error": "Username must be at least 3 characters."}), 400
+        if len(password) < 6:
+            return jsonify({"error": "Password must be at least 6 characters."}), 400
+
+        users_data = _read_json(USERS_FILE, {"users": []})
+        users = users_data.get("users", [])
+
+        if _find_user_by_username(users, username):
+            return jsonify({"error": "This username already exists. Please choose another."}), 409
+
+        if _find_user_by_email(users, email):
+            return jsonify({"error": "This email is already registered."}), 409
+
+        password_hash = _hash_password(password)
+        if _is_duplicate_password(users, password_hash):
+            return jsonify({"error": "This password is already used by another account. Use a different password."}), 409
+
+        users.append(
+            {
+                "id": str(uuid.uuid4()),
+                "email": email,
+                "username": username,
+                "passwordHash": password_hash,
+                "isPremium": False,
+                "planId": "free",
+                "ideaQuota": 1,
+                "createdAt": datetime.utcnow().isoformat(),
+            }
+        )
+        users_data["users"] = users
+        _write_json(USERS_FILE, users_data)
+
+        session["username"] = username
+
+        return jsonify(
+            {
+                "message": "Signup successful.",
+                "user": {
+                    "username": username,
+                    "isPremium": False,
+                    "planId": "free",
+                    "ideaQuota": 1,
+                },
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.post("/api/auth/login")
+def auth_login():
+    try:
+        payload = request.get_json(force=True)
+        username = str(payload.get("username", "")).strip()
+        password = str(payload.get("password", "")).strip()
+
+        users_data = _read_json(USERS_FILE, {"users": []})
+        users = users_data.get("users", [])
+        user = _find_user_by_username(users, username)
+
+        if not user:
+            return jsonify({"error": "Invalid username or password."}), 401
+
+        if user.get("passwordHash") != _hash_password(password):
+            return jsonify({"error": "Invalid username or password."}), 401
+
+        session["username"] = user.get("username")
+
+        return jsonify(
+            {
+                "message": "Login successful.",
+                "user": {
+                    "username": user.get("username"),
+                    "isPremium": bool(user.get("isPremium", False)),
+                    "planId": user.get("planId", "free"),
+                    "ideaQuota": int(user.get("ideaQuota", 1)),
+                },
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.post("/api/auth/logout")
+def auth_logout():
+    session.clear()
+    return jsonify({"message": "Logged out."})
+
+
+@app.get("/api/pricing")
+def get_pricing():
+    plans = [
+        {
+            "id": "starter",
+            "name": "Starter",
+            "pricePkr": 2500,
+            "ideaQuota": 10,
+            "description": "Best for solo founders validating focused concepts.",
+            "features": [
+                "10 complete idea validation runs",
+                "Market analysis with competitor mapping",
+                "Improvement recommendation workflow",
+                "SRS generation and Word export",
+                "Basic support",
+            ],
+        },
+        {
+            "id": "growth",
+            "name": "Growth",
+            "pricePkr": 5500,
+            "ideaQuota": 35,
+            "description": "For teams iterating multiple product directions.",
+            "features": [
+                "35 complete idea validation runs",
+                "Advanced competitor intelligence",
+                "Priority processing for generation steps",
+                "SRS export for all approved ideas",
+                "Team-friendly planning capacity",
+                "Priority support",
+            ],
+        },
+        {
+            "id": "scale",
+            "name": "Scale",
+            "pricePkr": 9500,
+            "ideaQuota": 100,
+            "description": "For agencies and accelerators with high idea volume.",
+            "features": [
+                "100 complete idea validation runs",
+                "High-volume multi-idea workflow",
+                "Structured strategic improvement planning",
+                "Full SRS export at scale",
+                "Best value per idea",
+                "Priority queue + support",
+                "Designed for agency and accelerator operations",
+            ],
+        },
+    ]
+    return jsonify({"plans": plans})
+
+
+@app.post("/api/payment/submit")
+def submit_payment_proof():
+    try:
+        session_username = session.get("username")
+        if not session_username:
+            return jsonify({"error": "Please login first."}), 401
+
+        username = str(request.form.get("username", "")).strip()
+        trx_id = str(request.form.get("trxId", "")).strip()
+        plan_id = str(request.form.get("planId", "")).strip().lower() or "growth"
+        screenshot = request.files.get("screenshot")
+
+        if not username:
+            return jsonify({"error": "Username is required."}), 400
+        if username.lower() != session_username.lower():
+            return jsonify({"error": "Submitted username must match logged in account."}), 400
+        if len(trx_id) < 4:
+            return jsonify({"error": "Transaction ID is required."}), 400
+        if screenshot is None or screenshot.filename == "":
+            return jsonify({"error": "Screenshot or proof file is required."}), 400
+        if not _allowed_payment_file(screenshot.filename):
+            return jsonify({"error": "Allowed proof formats: png, jpg, jpeg, webp, pdf."}), 400
+
+        plan_map = {
+            "starter": {"ideaQuota": 10, "pricePkr": 2500},
+            "growth": {"ideaQuota": 35, "pricePkr": 5500},
+            "scale": {"ideaQuota": 100, "pricePkr": 9500},
+        }
+        selected_plan = plan_map.get(plan_id, plan_map["growth"])
+        selected_plan_id = plan_id if plan_id in plan_map else "growth"
+
+        safe_name = secure_filename(screenshot.filename)
+        ext = os.path.splitext(safe_name)[1].lower()
+        proof_filename = f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex}{ext}"
+        proof_path = os.path.join(UPLOAD_DIR, proof_filename)
+        screenshot.save(proof_path)
+
+        users_data = _read_json(USERS_FILE, {"users": []})
+        users = users_data.get("users", [])
+        user = _find_user_by_username(users, username)
+        if not user:
+            return jsonify({"error": "User account not found."}), 404
+
+        # Activate premium immediately on submission as requested.
+        user["isPremium"] = True
+        user["planId"] = selected_plan_id
+        user["ideaQuota"] = int(selected_plan["ideaQuota"])
+        user["premiumActivatedAt"] = datetime.utcnow().isoformat()
+        _write_json(USERS_FILE, users_data)
+
+        payments_data = _read_json(PAYMENTS_FILE, {"payments": []})
+        payments = payments_data.get("payments", [])
+        payments.append(
+            {
+                "id": str(uuid.uuid4()),
+                "username": username,
+                "trxId": trx_id,
+                "planId": selected_plan_id,
+                "pricePkr": selected_plan["pricePkr"],
+                "proofFile": proof_filename,
+                "proofPath": proof_path,
+                "submittedAt": datetime.utcnow().isoformat(),
+                "status": "received-premium-activated",
+            }
+        )
+        payments_data["payments"] = payments
+        _write_json(PAYMENTS_FILE, payments_data)
+
+        return jsonify(
+            {
+                "message": "Payment proof received. Premium is now active.",
+                "user": {
+                    "username": user.get("username"),
+                    "isPremium": True,
+                    "planId": selected_plan_id,
+                    "ideaQuota": int(selected_plan["ideaQuota"]),
+                },
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 
 @app.post("/api/stage1")
@@ -689,6 +1125,7 @@ def stage3_generate_srs():
         problem = str(payload.get("problem", "")).strip()
         solution = str(payload.get("solution", "")).strip()
         final_features = normalize_features(payload.get("finalFeatures", []))
+        competitor_references = normalize_competitor_references(payload.get("competitorReferences", []))
 
         if not title:
             return jsonify({"error": "title is required"}), 400
@@ -701,6 +1138,9 @@ def stage3_generate_srs():
             user_prompt=srs_user_prompt(title, problem, solution, final_features),
             temperature=0.2,
         )
+
+        srs_markdown = normalize_srs_output(srs_markdown)
+        srs_markdown = append_competitor_references_section(srs_markdown, competitor_references)
 
         return jsonify({"srsMarkdown": srs_markdown})
 

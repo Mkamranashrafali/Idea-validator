@@ -1,82 +1,315 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Idea Validator</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-</head>
-<body>
-  <div class="bg-orb orb-a"></div>
-  <div class="bg-orb orb-b"></div>
 
-  <main class="container">
-    <header class="hero">
-      <p class="eyebrow">Startup Blueprint Generator</p>
-      <h1>From Raw Idea to Downloadable SRS</h1>
-      <p class="subtitle">Analyze market reality, sharpen your product angle, and generate a startup-grade software blueprint.</p>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Idea Validator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body data-page-mode="{{ page_mode|default('home') }}" data-checkout-plan="{{ checkout_plan|default('') }}"
+    data-next-path="{{ next_path|default('') }}">
+    <header class="topbar">
+        <div class="topbar-inner">
+            <a href="/" class="logo">IV</a>
+            <nav class="nav-links">
+                <a href="/">Dashboard</a>
+                <a href="#">Resources</a>
+                <a href="/pricing">Pricing</a>
+            </nav>
+            <div class="topbar-actions">
+                <a href="#" class="support-link">Support</a>
+                <span id="topAuthStatus" class="top-auth-status">Not logged in</span>
+                <a id="topLoginBtn" class="btn-secondary" href="/auth">Login</a>
+                <button id="topLogoutBtn" class="btn-secondary is-hidden" type="button">Logout</button>
+                <button id="navStartBtn" class="btn-primary" type="button">Start New Project</button>
+            </div>
+        </div>
     </header>
 
-    <section id="alerts" class="alerts" aria-live="polite"></section>
+    <main class="page-shell">
+        <section id="alerts" class="alerts" aria-live="polite"></section>
 
-    <section class="card stage-card active" id="stage-0">
-      <div class="stage-head">
-        <span class="stage-badge">1</span>
-        <h2>Idea Input</h2>
-      </div>
-      <label for="rawIdea">Raw Idea</label>
-      <textarea id="rawIdea" placeholder="Example: AI tool that validates startup ideas by analyzing competitors and generating technical blueprints."></textarea>
+        <section id="landingScreen" class="app-screen landing-screen">
+            <section class="hero">
+                <span class="hero-badge">AI Product Builder</span>
+                <h1>Turn a raw startup idea into a development-ready SRS</h1>
+                <p class="hero-subtitle">Your concept is not only described, it is transformed into market context,
+                    clear differentiation logic, and build-ready product requirements.</p>
+            </section>
 
-      <label for="features">Current Features (optional, one per line or comma-separated)</label>
-      <textarea id="features" placeholder="Example:\nMarket scan\nGap detection\nSRS export"></textarea>
+            <section id="features" class="flow-exposure panel">
+                <div class="flow-head">
+                    <p class="panel-kicker">How the engine works</p>
+                    <h2>What happens at each step</h2>
+                </div>
 
-      <button id="startAnalysisBtn" class="btn-primary">Start Analysis</button>
-    </section>
+                <div class="flow-grid">
+                    <article class="flow-card">
+                        <span class="flow-step">Step 01</span>
+                        <h3>Idea Input + Feature Context</h3>
+                        <p>The user submits a raw idea and current features. The system normalizes the input, removes
+                            unnecessary noise, and prepares an analysis-ready context.</p>
+                    </article>
+                    <article class="flow-card">
+                        <span class="flow-step">Step 02</span>
+                        <h3>Market Analysis Logic</h3>
+                        <p>The LLM identifies real competitors, relevant URLs, overlap points, similarity scores, and a
+                            market summary. That output is then converted into structured JSON for decision-friendly
+                            analysis.</p>
+                    </article>
+                    <article class="flow-card">
+                        <span class="flow-step">Step 03</span>
+                        <h3>Improvement Intelligence</h3>
+                        <p>Based on competitor gaps and market opportunity signals, the system suggests high-impact
+                            improvements. The user selects which strategies should be included in the final plan.</p>
+                    </article>
+                    <article class="flow-card">
+                        <span class="flow-step">Step 04</span>
+                        <h3>SRS Generation + Export</h3>
+                        <p>Selected features are converted into an architecture-level SRS document. The final output is
+                            previewed and exported as a .docx file for implementation handoff.</p>
+                    </article>
+                </div>
+            </section>
 
-    <section class="card stage-card" id="stage-1">
-      <div class="stage-head">
-        <span class="stage-badge">2</span>
-        <h2>Stage 1: Market Analysis</h2>
-      </div>
+            <section class="landing-cta panel">
+                <p>From idea uncertainty to execution clarity, one guided workflow.</p>
+                <button id="landingStartBtn" class="btn-primary" type="button">Start Your First Step</button>
+            </section>
+        </section>
 
-      <h3>Competitors</h3>
-      <div id="competitors" class="competitor-grid"></div>
+        <section id="authScreen" class="app-screen auth-screen">
+            <section id="authSection" class="panel auth-panel standalone-panel">
+                <div class="auth-head">
+                    <p class="panel-kicker">Account Access</p>
+                    <h2>Signup and Login</h2>
+                </div>
 
-      <h3>Market Summary</h3>
-      <p id="marketSummary" class="summary"></p>
+                <div class="auth-shell">
+                    <div class="auth-mode-switch" role="tablist" aria-label="Authentication mode">
+                        <button id="authModeSignupBtn" class="auth-mode-btn active" type="button">Sign Up</button>
+                        <button id="authModeLoginBtn" class="auth-mode-btn" type="button">Login</button>
+                    </div>
 
-      <h3>Differentiation Insight</h3>
-      <p id="differentiation" class="summary"></p>
+                    <form id="signupForm" class="auth-form active" novalidate>
+                        <div>
+                            <label for="signupEmail">Email</label>
+                            <input id="signupEmail" type="email" placeholder="Enter email">
+                        </div>
+                        <div>
+                            <label for="signupUsername">Username</label>
+                            <input id="signupUsername" type="text" placeholder="Choose username">
+                        </div>
+                        <div>
+                            <label for="signupPassword">Password</label>
+                            <input id="signupPassword" type="password" placeholder="Create password">
+                        </div>
+                        <div>
+                            <label for="signupConfirmPassword">Confirm Password</label>
+                            <input id="signupConfirmPassword" type="password" placeholder="Confirm password">
+                        </div>
+                        <button id="signupSubmitBtn" class="btn-primary auth-submit" type="submit">Create
+                            Account</button>
+                    </form>
 
-      <button id="toStage2Btn" class="btn-primary">Next</button>
-    </section>
+                    <form id="loginForm" class="auth-form" novalidate>
+                        <div>
+                            <label for="loginUsername">Username</label>
+                            <input id="loginUsername" type="text" placeholder="Enter username">
+                        </div>
+                        <div>
+                            <label for="loginPassword">Password</label>
+                            <input id="loginPassword" type="password" placeholder="Enter password">
+                        </div>
+                        <button id="loginSubmitBtn" class="btn-primary auth-submit" type="submit">Login</button>
+                    </form>
 
-    <section class="card stage-card" id="stage-2">
-      <div class="stage-head">
-        <span class="stage-badge">3</span>
-        <h2>Stage 2: Improvements</h2>
-      </div>
+                    <p id="authFormMessage" class="auth-form-message"></p>
+                </div>
+            </section>
+        </section>
 
-      <p class="hint">Select the suggestions you want to include in the final blueprint.</p>
-      <div id="suggestionsList" class="suggestions-list"></div>
+        <section id="pricingScreen" class="app-screen pricing-screen">
+            <section class="panel pricing-panel standalone-panel">
+                <div class="auth-head">
+                    <p class="panel-kicker">Pricing</p>
+                    <h2>Business Model (Per Idea Capacity)</h2>
+                </div>
+                <div id="pricingPlans" class="pricing-grid"></div>
+            </section>
+        </section>
 
-      <button id="toStage3Btn" class="btn-primary">Next</button>
-    </section>
+        <section id="checkoutScreen" class="app-screen checkout-screen">
+            <section class="panel pricing-panel standalone-panel">
+                <div class="auth-head">
+                    <p class="panel-kicker">Checkout</p>
+                    <h2>Submit Payment Proof</h2>
+                </div>
 
-    <section class="card stage-card" id="stage-3">
-      <div class="stage-head">
-        <span class="stage-badge">4</span>
-        <h2>Stage 3: SRS Generate</h2>
-      </div>
+                <div id="paymentBox" class="payment-box active">
+                    <div class="payment-bank">
+                        <p class="panel-kicker">Payment Account</p>
+                        <h3>HBL</h3>
+                        <p class="account-no">12157901192103</p>
+                    </div>
 
-      <article id="srsPreview" class="srs-preview"></article>
-      <button id="downloadBtn" class="btn-primary">Download</button>
-    </section>
-  </main>
+                    <div class="payment-form-grid">
+                        <div>
+                            <label for="paymentUsername">Username</label>
+                            <input id="paymentUsername" type="text" placeholder="Your account username">
+                        </div>
+                        <div>
+                            <label for="paymentPlan">Selected Plan</label>
+                            <input id="paymentPlan" type="text" readonly>
+                        </div>
+                        <div>
+                            <label for="trxId">Transaction ID</label>
+                            <input id="trxId" type="text" placeholder="Enter TRX ID">
+                        </div>
+                        <div>
+                            <label for="paymentScreenshot">Screenshot / Proof</label>
+                            <input id="paymentScreenshot" type="file" accept=".png,.jpg,.jpeg,.webp,.pdf">
+                        </div>
+                    </div>
 
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+                    <button id="submitPaymentBtn" class="btn-primary" type="button">Submit Payment Proof</button>
+                    <p class="payment-note">After submission, premium is activated immediately for your username.</p>
+                </div>
+            </section>
+        </section>
+
+        <section id="processScreen" class="app-screen process-screen">
+            <section class="name-entry panel">
+                <div>
+                    <p class="panel-kicker">Welcome</p>
+                    <h2>Set your workspace identity</h2>
+                </div>
+                <div class="name-form">
+                    <label for="userNameInput">User Name</label>
+                    <input id="userNameInput" type="text" placeholder="Enter your name">
+                    <button id="saveNameBtn" class="btn-secondary" type="button">Save Name</button>
+                </div>
+            </section>
+
+            <section class="metrics-grid" aria-label="Dashboard metrics">
+                <article class="metric-card">
+                    <div class="metric-icon">01</div>
+                    <p class="metric-value" id="metricIdeas">01</p>
+                    <p class="metric-label">Ideas Created</p>
+                </article>
+                <article class="metric-card">
+                    <div class="metric-icon">02</div>
+                    <p class="metric-value" id="metricStage">Input</p>
+                    <p class="metric-label">Current Stage</p>
+                </article>
+                <article class="metric-card">
+                    <div class="metric-icon">03</div>
+                    <p class="metric-value" id="metricSuggestions">00</p>
+                    <p class="metric-label">Suggestions Selected</p>
+                </article>
+                <article class="metric-card">
+                    <div class="metric-icon">04</div>
+                    <p class="metric-value" id="metricSrs">Pending</p>
+                    <p class="metric-label">SRS Status</p>
+                </article>
+            </section>
+
+            <section class="workspace panel stage-card active" id="stage-0">
+                <div class="workspace-head">
+                    <div>
+                        <p class="panel-kicker">Create Idea</p>
+                        <h2>Describe your product concept</h2>
+                    </div>
+                    <span class="stage-chip">Stage 1 of 4</span>
+                </div>
+
+                <div class="form-grid">
+                    <div>
+                        <label for="rawIdea">Raw Idea</label>
+                        <textarea id="rawIdea"
+                            placeholder="Example: AI platform that validates startup concepts through market benchmarking and product blueprints."></textarea>
+                    </div>
+                    <div>
+                        <label for="features">Current Features (optional)</label>
+                        <textarea id="features" placeholder="One per line or comma separated"></textarea>
+                    </div>
+                </div>
+
+                <div class="workspace-actions">
+                    <button id="startAnalysisBtn" class="btn-primary" type="button">Start Analysis</button>
+                </div>
+            </section>
+
+            <section class="workspace panel stage-card" id="stage-1">
+                <div class="workspace-head">
+                    <div>
+                        <p class="panel-kicker">Stage 1</p>
+                        <h2>Market Analysis Results</h2>
+                    </div>
+                    <span class="stage-chip">Analysis Complete</span>
+                </div>
+
+                <h3>Competitors</h3>
+                <div id="competitors" class="competitor-grid"></div>
+
+                <div class="summary-grid">
+                    <article class="summary-card">
+                        <h3>Market Summary</h3>
+                        <p id="marketSummary" class="summary"></p>
+                    </article>
+                    <article class="summary-card">
+                        <h3>Differentiation Insight</h3>
+                        <p id="differentiation" class="summary"></p>
+                    </article>
+                </div>
+
+                <div class="workspace-actions">
+                    <button id="toStage2Btn" class="btn-primary" type="button">Next</button>
+                </div>
+            </section>
+
+            <section class="workspace panel stage-card" id="stage-2">
+                <div class="workspace-head">
+                    <div>
+                        <p class="panel-kicker">Stage 2</p>
+                        <h2>Improvement Selection</h2>
+                    </div>
+                    <span class="stage-chip">Select Your Strategy</span>
+                </div>
+
+                <p class="hint">Choose the improvement ideas you want to include in your final SRS.</p>
+                <div id="suggestionsList" class="suggestions-list"></div>
+
+                <div class="workspace-actions">
+                    <button id="toStage3Btn" class="btn-primary" type="button">Next</button>
+                </div>
+            </section>
+
+            <section class="workspace panel stage-card" id="stage-3">
+                <div class="workspace-head">
+                    <div>
+                        <p class="panel-kicker">Stage 3</p>
+                        <h2>Software Requirements Specification</h2>
+                    </div>
+                    <span class="stage-chip">Ready to Export</span>
+                </div>
+
+                <article id="srsPreview" class="srs-preview"></article>
+
+                <div class="workspace-actions">
+                    <button id="downloadBtn" class="btn-primary" type="button">Download .docx</button>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
+
 </html>
