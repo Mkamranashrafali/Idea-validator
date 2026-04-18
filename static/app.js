@@ -19,7 +19,7 @@ const stageEls = [
 const alertsEl = document.getElementById("alerts");
 
 const rawIdeaEl = document.getElementById("rawIdea");
-const featuresEl = document.getElementById("features");
+const featuresEl = document.getElementById("currentFeatures");
 
 const startAnalysisBtn = document.getElementById("startAnalysisBtn");
 const toStage2Btn = document.getElementById("toStage2Btn");
@@ -239,19 +239,27 @@ function renderSuggestions(suggestions = []) {
 
     suggestions.forEach((item, idx) => {
         const id = item.id || `sg-${idx + 1}`;
+        const displayType = String(item.type || "feature")
+            .replace(/[_-]+/g, " ")
+            .replace(/\b\w/g, (c) => c.toUpperCase());
+        const description = String(item.description || "").replace(/\s+/g, " ").trim();
+        const source = String(item.sourceInspiration || "N/A").trim();
         const wrapper = document.createElement("article");
         wrapper.className = "suggestion-item";
 
         wrapper.innerHTML = `
-      <label>
-        <input type="checkbox" data-suggestion-id="${id}" checked>
-        <span>
-          <strong>${item.title || "Untitled Suggestion"}</strong><br>
-          ${item.description || ""}<br>
-          <span class="suggestion-type">${item.type || "feature"}</span><br>
-          <small>Source: ${item.sourceInspiration || "N/A"}</small>
-        </span>
-      </label>
+            <label class="suggestion-label">
+                <input type="checkbox" data-suggestion-id="${id}" checked>
+                <div class="suggestion-body">
+                    <div class="suggestion-head">
+                        <p class="suggestion-index">Suggestion ${idx + 1}</p>
+                        <span class="suggestion-type">${displayType}</span>
+                    </div>
+                    <h4 class="suggestion-title">${item.title || "Untitled Suggestion"}</h4>
+                    <p class="suggestion-description">${description || "No description provided."}</p>
+                    <p class="suggestion-source"><strong>Source:</strong> ${source}</p>
+                </div>
+            </label>
     `;
 
         suggestionsListEl.appendChild(wrapper);
