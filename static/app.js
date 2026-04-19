@@ -152,15 +152,15 @@ function openProcessScreen() {
 }
 
 function redirectAfterAuthSuccess() {
-    if (!NEXT_PATH) {
+    const fallbackPath = "/workspace";
+    const targetPath = NEXT_PATH || fallbackPath;
+
+    if (!targetPath.startsWith("/") || targetPath.startsWith("//")) {
+        window.location.href = fallbackPath;
         return;
     }
 
-    if (!NEXT_PATH.startsWith("/") || NEXT_PATH.startsWith("//")) {
-        return;
-    }
-
-    window.location.href = NEXT_PATH;
+    window.location.href = targetPath;
 }
 
 function activateScreen(mode) {
